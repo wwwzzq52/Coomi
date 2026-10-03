@@ -1,6 +1,9 @@
 name: Build CoomiDev APK
 
-on:
+"on":
+  push:
+    branches:
+      - "codex/**"
   workflow_dispatch:
     inputs:
       ref:
