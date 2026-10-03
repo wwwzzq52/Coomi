@@ -3,14 +3,14 @@ name: Publish CoomiDev Release
 on:
   workflow_dispatch:
     inputs:
-      run_id:
-        description: 'Run ID to download artifact from'
-        required: true
-        default: '37123324263'
       version:
         description: 'Version tag (e.g. v1.4.71-dev)'
         required: true
         default: 'v1.4.71-dev'
+      artifact_id:
+        description: 'Artifact ID to download'
+        required: true
+        default: '11273423653'
 
 permissions:
   contents: write
@@ -21,17 +21,36 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - name: Download artifact from run
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download artifact
         run: |
           set -euo pipefail
+          echo "Downloading artifact ${{ inputs.artifact_id }}..."
           curl -sL -H "Authorization: Bearer ${{ github.token }}" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/11273423653/zip" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/${{ inputs.artifact_id }}/zip" \
             -o /tmp/artifact.zip
           ls -lh /tmp/artifact.zip
           unzip -o /tmp/artifact.zip -d /tmp/artifact/
           ls -lh /tmp/artifact/
 
-      - name: Upload as GitHub Release
+      - name: Create git tag
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.version }}"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git tag -f "$TAG" origin/main
+          git push origin "$TAG" --force
+          echo "Tag $TAG pushed"
+
+      - name: Upload as GitHub Release using gh CLI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           TAG="${{ inputs.version }}"
@@ -45,48 +64,33 @@ jobs:
           [ -f "$SHA256_PATH" ] && echo "SHA256: $(cat $SHA256_PATH)"
           [ -f "$SIZE_PATH" ] && echo "Size: $(cat $SIZE_PATH)"
 
-          # Delete existing release if any
-          curl -s -X DELETE \
-            -H "Authorization: Bearer ${{ github.token }}" \
-            "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG" \
-            > /dev/null 2>&1 || true
-
-          # Create release
-          RELEASE_ID=$(curl -s -X POST \
-            -H "Authorization: Bearer ${{ github.token }}" \
-            -H "Content-Type: application/json" \
-            -d "{\"tag_name\":\"$TAG\",\"name\":\"CoomiDev $TAG\",\"body\":\"Auto-built CoomiDev APK\",\"draft\":false,\"prerelease\":true}" \
-            "https://api.github.com/repos/${{ github.repository }}/releases" | \
-            grep -o '"id":[0-9]*' | head -1 | cut -d: -f2)
-          echo "Release ID: $RELEASE_ID"
-
-          # Upload APK
-          curl -sL -X POST \
-            -H "Authorization: Bearer ${{ github.token }}" \
-            -H "Content-Type: application/octet-stream" \
-            --data-binary "@$APK_PATH" \
-            "https://uploads.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID/assets?name=$APK_BASE" \
-            -o /dev/null -w "APK Upload: HTTP %{http_code}\n"
-
-          # Upload checksum
-          if [ -f "$SHA256_PATH" ]; then
-            curl -sL -X POST \
-              -H "Authorization: Bearer ${{ github.token }}" \
-              -H "Content-Type: application/octet-stream" \
-              --data-binary "@$SHA256_PATH" \
-              "https://uploads.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID/assets?name=$(basename $SHA256_PATH)" \
-              -o /dev/null -w "SHA256 Upload: HTTP %{http_code}\n"
+          # Check if release exists, delete if so
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "Deleting existing release $TAG..."
+            gh release delete "$TAG" --yes --cleanup-tag
+          else
+            echo "No existing release $TAG"
           fi
 
-          # Upload size
+          # Create new release
+          echo "Creating release $TAG..."
+          gh release create "$TAG" \
+            --title "CoomiDev $TAG" \
+            --notes "Auto-built CoomiDev APK" \
+            --prerelease \
+            "$APK_PATH"
+          echo "APK uploaded"
+
+          # Upload checksum and size
+          if [ -f "$SHA256_PATH" ]; then
+            gh release upload "$TAG" "$SHA256_PATH" --clobber
+            echo "SHA256 uploaded"
+          fi
           if [ -f "$SIZE_PATH" ]; then
-            curl -sL -X POST \
-              -H "Authorization: Bearer ${{ github.token }}" \
-              -H "Content-Type: application/octet-stream" \
-              --data-binary "@$SIZE_PATH" \
-              "https://uploads.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID/assets?name=$(basename $SIZE_PATH)" \
-              -o /dev/null -w "Size Upload: HTTP %{http_code}\n"
+            gh release upload "$TAG" "$SIZE_PATH" --clobber
+            echo "Size uploaded"
           fi
 
           echo "=== Release published ==="
+          gh release view "$TAG" --json tagName,name,isPrerelease,assets --jq '.assets[].name'
           echo "URL: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG"
