@@ -100,9 +100,12 @@ jobs:
           sed -i 's/android\.defaultConfig\.minSdkVersion\.apiLevel/android.defaultConfig.minSdkVersion/' apps/coomi-app/app/build.gradle
           echo "Removing runtime-v2 staging (release files not available)..."
           sed -i 's/"stageCoomiRuntimeV2", "stageCoomiDevIcon"/"stageCoomiDevIcon"/' apps/coomi-app/app/build.gradle
+          echo "Removing rust-toolchain.toml to prevent version override..."
+          rm -f apps/coomi-rs/rust-toolchain.toml
           echo "Verifying patches..."
           grep -n "minSdkVersion" apps/coomi-app/app/build.gradle
           grep -n "stageCoomiWeb" apps/coomi-app/app/build.gradle
+          test ! -f apps/coomi-rs/rust-toolchain.toml && echo "rust-toolchain.toml removed"
 
       - name: Install frontend dependencies
         working-directory: apps/web
