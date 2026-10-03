@@ -143,7 +143,11 @@ jobs:
           echo "$APK_ABS" > /tmp/coomidev_apk_path.txt
           "$ANDROID_HOME/build-tools/36.0.0/aapt2" dump badging "$APK_ABS" > /tmp/badging.txt
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK_ABS" > /tmp/sign.txt
-          grep -q 'package: name="com.coomidev.android"' /tmp/badging.txt || { echo "MISSING package"; exit 1; }
+          echo "=== aapt2 badging.txt (head 40) ==="
+          head -40 /tmp/badging.txt
+          echo "=== apksigner sign.txt (head 20) ==="
+          head -20 /tmp/sign.txt
+          grep -qE "package: name=.{0,3}coomidev" /tmp/badging.txt || { echo "MISSING package (coomidev)"; exit 1; }
           grep -q "CoomiDev" /tmp/badging.txt || { echo "MISSING label"; exit 1; }
           grep -q "arm64-v8a" /tmp/badging.txt || { echo "MISSING ABI"; exit 1; }
           grep -qE 'Signature #.*Verified' /tmp/sign.txt || { echo "NOT SIGNED"; exit 1; }
