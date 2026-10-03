@@ -1,0 +1,232 @@
+name: Build CoomiDev APK
+
+on:
+  push:
+    branches: [codex/**]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    name: Build CoomiDev APK (arm64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+
+    env:
+      STORE_PW: android
+      KEY_PW: android
+      VERSION_NAME: 1.4.71-dev
+      VERSION_CODE: "14071"
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Setup Rust with Android target
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "stable"
+          targets: aarch64-linux-android
+          components: rustfmt,clippy
+
+      - name: Setup Android SDK and install NDK
+        run: |
+          set -uo pipefail
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          for candidate in \
+            "$ANDROID_HOME/cmdline-tools/latest/bin" \
+            "$ANDROID_HOME/cmdline-tools/16.0/bin" \
+            "$ANDROID_HOME/cmdline-tools/12.0/bin"; do
+            if [ -x "$candidate/sdkmanager" ]; then
+              export PATH="$candidate:$PATH"
+              echo "Added $candidate to PATH"
+              break
+            fi
+          done
+          command -v sdkmanager
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager \
+            "ndk;27.0.12077973" \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "platform-tools"
+          test -x "$ANDROID_HOME/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang"
+          test -x "$ANDROID_HOME/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
+          test -x "$ANDROID_HOME/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ranlib"
+          echo "NDK 27.0.12077973 installed OK"
+
+      - name: Configure signing
+        run: |
+          set -uo pipefail
+          STORE_FILE="apps/coomi-app/app/testkey_untrusted.jks"
+          rm -f "$STORE_FILE"
+          echo "Generating new keystore at $STORE_FILE"
+          keytool -genkeypair -v \
+            -keystore "$STORE_FILE" \
+            -storetype PKCS12 \
+            -storepass "$STORE_PW" \
+            -keypass "$KEY_PW" \
+            -alias alias \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=CoomiDev-Untrusted,OU=Dev,O=Dev,L=Unknown,ST=Unknown,C=US"
+          echo "Verifying keystore..."
+          keytool -list -keystore "$STORE_FILE" -storepass "$STORE_PW" -storetype PKCS12
+          cat > local.properties << PROPS
+            coomi.signing.storePassword=$STORE_PW
+            coomi.signing.keyPassword=$KEY_PW
+            sdk.dir=$ANDROID_HOME
+          PROPS
+          chmod 600 local.properties
+
+      - name: Patch build.gradle for CI
+        run: |
+          set -uo pipefail
+          echo "Fixing minSdkVersion.apiLevel.toInteger() bug..."
+          sed -i 's/android\.defaultConfig\.minSdkVersion\.apiLevel/android.defaultConfig.minSdkVersion/' apps/coomi-app/app/build.gradle
+          echo "Removing runtime-v2 staging (release files not available)..."
+          sed -i 's/"stageCoomiRuntimeV2", "stageCoomiDevIcon"/"stageCoomiDevIcon"/' apps/coomi-app/app/build.gradle
+          echo "Removing rust-toolchain.toml to prevent version override..."
+          rm -f apps/coomi-rs/rust-toolchain.toml
+          echo "Verifying patches..."
+          grep -n "minSdkVersion" apps/coomi-app/app/build.gradle
+          grep -n "stageCoomiWeb" apps/coomi-app/app/build.gradle
+          test ! -f apps/coomi-rs/rust-toolchain.toml && echo "rust-toolchain.toml removed"
+
+      - name: Install frontend dependencies
+        working-directory: apps/web
+        run: |
+          set -uo pipefail
+          npm ci
+
+      - name: Build CoomiDev APK
+        run: |
+          set -uo pipefail
+          export NDK_HOME="$ANDROID_HOME/ndk/27.0.12077973"
+          export COOMI_NDK_TOOLCHAIN_DIR="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          export COOMI_ANDROID_CLANG="$COOMI_NDK_TOOLCHAIN_DIR/aarch64-linux-android24-clang"
+          export COOMI_ANDROID_AR="$COOMI_NDK_TOOLCHAIN_DIR/llvm-ar"
+          export COOMI_ANDROID_RANLIB="$COOMI_NDK_TOOLCHAIN_DIR/llvm-ranlib"
+          COOMI_DEV_BUILD=1 \
+          TERMUX_APP_VERSION_NAME="$VERSION_NAME" \
+          COOMI_NDK_HOME="$NDK_HOME" \
+          ./gradlew :app:assembleRelease \
+            -PcoomiVersionCode="$VERSION_CODE" \
+            --no-daemon --max-workers=2
+          find apps/coomi-app/app/build/outputs/apk -name "CoomiDev-*.apk" -type f
+
+      - name: Verify APK
+        run: |
+          set -uo pipefail
+          APK=$(find apps/coomi-app/app/build/outputs/apk -name "CoomiDev-*.apk" -type f | head -1)
+          APK_ABS=$(readlink -f "$APK")
+          echo "APK_ABS=$APK_ABS"
+          echo "$APK_ABS" > /tmp/coomidev_apk_path.txt
+          "$ANDROID_HOME/build-tools/36.0.0/aapt2" dump badging "$APK_ABS" > /tmp/badging.txt
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK_ABS" > /tmp/sign.txt
+          echo "=== aapt2 badging.txt (head 40) ==="
+          head -40 /tmp/badging.txt
+          echo "=== apksigner sign.txt (head 20) ==="
+          head -20 /tmp/sign.txt
+          grep -qE "package:.*coomidev" /tmp/badging.txt || { echo "MISSING package (coomidev)"; exit 1; }
+          grep -q "CoomiDev" /tmp/badging.txt || { echo "MISSING label"; exit 1; }
+          grep -q "arm64-v8a" /tmp/badging.txt || { echo "MISSING ABI"; exit 1; }
+          grep -qE "Verified using v[0-9.]+ scheme.*: true" /tmp/sign.txt || { echo "NOT SIGNED with v2+ scheme"; exit 1; }
+          echo "APK verification PASSED"
+
+      - name: Checksums
+        run: |
+          set -uo pipefail
+          APK_ABS=$(cat /tmp/coomidev_apk_path.txt)
+          cd "$(dirname "$APK_ABS")"
+          sha256sum "$(basename "$APK_ABS")" > "$(basename "$APK_ABS").sha256"
+          stat -c "%s bytes" "$(basename "$APK_ABS")" > "$(basename "$APK_ABS").size"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coomidev-apk
+          path: |
+            apps/coomi-app/app/build/outputs/apk/release/*.apk
+            apps/coomi-app/app/build/outputs/apk/release/*.apk.sha256
+            apps/coomi-app/app/build/outputs/apk/release/*.apk.size
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        run: |
+          set -uo pipefail
+          APK_ABS=$(cat /tmp/coomidev_apk_path.txt)
+          cd "$(dirname "$APK_ABS")"
+          APK_BASE=$(basename "$APK_ABS")
+          SHA256_FILE="${APK_BASE}.sha256"
+          SIZE_FILE="${APK_BASE}.size"
+          TAG="v${VERSION_NAME}"
+          echo "Publishing Release $TAG..."
+          curl -s -X DELETE \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG" \
+            > /dev/null 2>&1 || true
+          RELEASE_ID=$(curl -s -X POST \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"tag_name\":\"$TAG\",\"name\":\"CoomiDev $VERSION_NAME\",\"body\":\"Auto-built by CI run $GITHUB_RUN_ID\",\"draft\":false,\"prerelease\":true}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases" | \
+            grep -o '"id":[0-9]*' | head -1 | cut -d: -f2)
+          echo "Release ID: $RELEASE_ID"
+          curl -sL -X POST \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary "@$APK_BASE" \
+            "https://uploads.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID/assets?name=$APK_BASE" \
+            -o /dev/null -w "APK upload: HTTP %{http_code}\n"
+          curl -sL -X POST \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary "@$SHA256_FILE" \
+            "https://uploads.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID/assets?name=$SHA256_FILE" \
+            -o /dev/null -w "SHA256 upload: HTTP %{http_code}\n"
+          curl -sL -X POST \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary "@$SIZE_FILE" \
+            "https://uploads.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID/assets?name=$SIZE_FILE" \
+            -o /dev/null -w "Size upload: HTTP %{http_code}\n"
+          echo "Release URL: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### CoomiDev APK build summary"
+            echo ""
+            echo "- Version: $VERSION_NAME (code $VERSION_CODE)"
+            echo "- Package: com.coomidev.android"
+            echo "- ABI: arm64-v8a"
+            echo "- Port: 18765"
+            if [ -f /tmp/coomidev_apk_path.txt ]; then
+              echo "- APK: $(cat /tmp/coomidev_apk_path.txt)"
+            fi
+            echo ""
+            echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          } >> "$GITHUB_STEP_SUMMARY"
