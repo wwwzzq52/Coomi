@@ -150,7 +150,7 @@ jobs:
           grep -qE "package:.*coomidev" /tmp/badging.txt || { echo "MISSING package (coomidev)"; exit 1; }
           grep -q "CoomiDev" /tmp/badging.txt || { echo "MISSING label"; exit 1; }
           grep -q "arm64-v8a" /tmp/badging.txt || { echo "MISSING ABI"; exit 1; }
-          grep -qE 'Signature #.*Verified' /tmp/sign.txt || { echo "NOT SIGNED"; exit 1; }
+          grep -qE "Verified using v[0-9.]+ scheme.*: true" /tmp/sign.txt || { echo "NOT SIGNED with v2+ scheme"; exit 1; }
           echo "APK verification PASSED"
 
       - name: Checksums
