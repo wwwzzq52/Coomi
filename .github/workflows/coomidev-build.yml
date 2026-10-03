@@ -47,11 +47,13 @@ jobs:
           components: rustfmt,clippy
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install NDK and platform
         run: |
           set -euo pipefail
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          ls -la "$ANDROID_HOME" 2>&1 | head -10
+          echo "SDK root:"
+          test -d "$ANDROID_HOME"
+          # 安装 NDK + platform + build-tools
           yes | sdkmanager \
             "ndk;27.0.12077973" \
             "platforms;android-36" \
