@@ -3,9 +3,10 @@ name: Build CoomiDev APK
 on:
   push:
     branches: [codex/**]
+  workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-apk:
@@ -171,6 +172,47 @@ jobs:
             apps/coomi-app/app/build/outputs/apk/release/*.apk.size
           if-no-files-found: error
           retention-days: 30
+
+      - name: Publish GitHub Release
+        run: |
+          set -uo pipefail
+          APK_ABS=$(cat /tmp/coomidev_apk_path.txt)
+          cd "$(dirname "$APK_ABS")"
+          APK_BASE=$(basename "$APK_ABS")
+          SHA256_FILE="${APK_BASE}.sha256"
+          SIZE_FILE="${APK_BASE}.size"
+          TAG="v${VERSION_NAME}"
+          echo "Publishing Release $TAG..."
+          curl -s -X DELETE \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG" \
+            > /dev/null 2>&1 || true
+          RELEASE_ID=$(curl -s -X POST \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"tag_name\":\"$TAG\",\"name\":\"CoomiDev $VERSION_NAME\",\"body\":\"Auto-built by CI run $GITHUB_RUN_ID\",\"draft\":false,\"prerelease\":true}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases" | \
+            grep -o '"id":[0-9]*' | head -1 | cut -d: -f2)
+          echo "Release ID: $RELEASE_ID"
+          curl -sL -X POST \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary "@$APK_BASE" \
+            "https://uploads.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID/assets?name=$APK_BASE" \
+            -o /dev/null -w "APK upload: HTTP %{http_code}\n"
+          curl -sL -X POST \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary "@$SHA256_FILE" \
+            "https://uploads.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID/assets?name=$SHA256_FILE" \
+            -o /dev/null -w "SHA256 upload: HTTP %{http_code}\n"
+          curl -sL -X POST \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary "@$SIZE_FILE" \
+            "https://uploads.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID/assets?name=$SIZE_FILE" \
+            -o /dev/null -w "Size upload: HTTP %{http_code}\n"
+          echo "Release URL: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG"
 
       - name: Summary
         if: always()
