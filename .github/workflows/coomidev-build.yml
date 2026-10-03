@@ -15,4 +15,6 @@ jobs:
   test:
     runs-on: ubuntu-24.04
     steps:
-      - run: echo "hello 4 - with concurrency"
+      - uses: actions/checkout@v4
+      - run: echo "hello 5 - with checkout"
+      - run: ls -la
