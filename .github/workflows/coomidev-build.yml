@@ -50,16 +50,32 @@ jobs:
         run: |
           set -euo pipefail
           echo "ANDROID_HOME=$ANDROID_HOME"
-          ls -la "$ANDROID_HOME" 2>&1 | head -10
-          echo "SDK root:"
-          test -d "$ANDROID_HOME"
+          ls -la "$ANDROID_HOME" | head -10
+          # 把 cmdline-tools 加到 PATH
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          for candidate in \
+            "$ANDROID_HOME/cmdline-tools/latest/bin" \
+            "$ANDROID_HOME/cmdline-tools/16.0/bin" \
+            "$ANDROID_HOME/cmdline-tools/12.0/bin"; do
+            if [ -x "$candidate/sdkmanager" ]; then
+              export PATH="$candidate:$PATH"
+              echo "Added $candidate to PATH"
+              break
+            fi
+          done
+          command -v sdkmanager
+          sdkmanager --version
+          # 接受所有 licenses（yes 会持续输出 y）
+          yes | sdkmanager --licenses >/dev/null || true
           # 安装 NDK + platform + build-tools
-          yes | sdkmanager \
+          sdkmanager \
             "ndk;27.0.12077973" \
             "platforms;android-36" \
-            "build-tools;36.0.0" || true
-          sdkmanager --licenses || true
-          ndk --version
+            "build-tools;36.0.0" \
+            "platform-tools"
+          # 验证 NDK
+          ls "$ANDROID_HOME/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin/" | head -5
+          "$ANDROID_HOME/ndk/27.0.12077973/build-tools/android-36/aarch64-linux-android24-clang" --version 2>&1 | head -3 || true
 
       - name: Configure signing
         run: |
