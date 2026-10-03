@@ -16,7 +16,7 @@ jobs:
     env:
       STORE_PW: android
       KEY_PW: android
-      VERSION_NAME: 1.4.71.0-dev
+      VERSION_NAME: 1.4.71-dev
       VERSION_CODE: "14071"
 
     steps:
