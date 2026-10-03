@@ -7,8 +7,12 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: coomidev-build
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-24.04
     steps:
-      - run: echo "hello 3 - test with permissions"
+      - run: echo "hello 4 - with concurrency"
