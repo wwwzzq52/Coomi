@@ -1,0 +1,92 @@
+name: Publish CoomiDev Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'Run ID to download artifact from'
+        required: true
+        default: '37123324263'
+      version:
+        description: 'Version tag (e.g. v1.4.71-dev)'
+        required: true
+        default: 'v1.4.71-dev'
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Download artifact from run
+        run: |
+          set -euo pipefail
+          curl -sL -H "Authorization: Bearer ${{ github.token }}" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/11273423653/zip" \
+            -o /tmp/artifact.zip
+          ls -lh /tmp/artifact.zip
+          unzip -o /tmp/artifact.zip -d /tmp/artifact/
+          ls -lh /tmp/artifact/
+
+      - name: Upload as GitHub Release
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.version }}"
+          APK_PATH="/tmp/artifact/CoomiDev-1.4.71-dev-release-arm64-v8a.apk"
+          test -f "$APK_PATH" || { echo "APK not found!"; ls -R /tmp/artifact/; exit 1; }
+          APK_BASE=$(basename "$APK_PATH")
+          SHA256_PATH="${APK_PATH}.sha256"
+          SIZE_PATH="${APK_PATH}.size"
+
+          echo "APK: $(ls -lh $APK_PATH)"
+          [ -f "$SHA256_PATH" ] && echo "SHA256: $(cat $SHA256_PATH)"
+          [ -f "$SIZE_PATH" ] && echo "Size: $(cat $SIZE_PATH)"
+
+          # Delete existing release if any
+          curl -s -X DELETE \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG" \
+            > /dev/null 2>&1 || true
+
+          # Create release
+          RELEASE_ID=$(curl -s -X POST \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"tag_name\":\"$TAG\",\"name\":\"CoomiDev $TAG\",\"body\":\"Auto-built CoomiDev APK\",\"draft\":false,\"prerelease\":true}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases" | \
+            grep -o '"id":[0-9]*' | head -1 | cut -d: -f2)
+          echo "Release ID: $RELEASE_ID"
+
+          # Upload APK
+          curl -sL -X POST \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary "@$APK_PATH" \
+            "https://uploads.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID/assets?name=$APK_BASE" \
+            -o /dev/null -w "APK Upload: HTTP %{http_code}\n"
+
+          # Upload checksum
+          if [ -f "$SHA256_PATH" ]; then
+            curl -sL -X POST \
+              -H "Authorization: Bearer ${{ github.token }}" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary "@$SHA256_PATH" \
+              "https://uploads.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID/assets?name=$(basename $SHA256_PATH)" \
+              -o /dev/null -w "SHA256 Upload: HTTP %{http_code}\n"
+          fi
+
+          # Upload size
+          if [ -f "$SIZE_PATH" ]; then
+            curl -sL -X POST \
+              -H "Authorization: Bearer ${{ github.token }}" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary "@$SIZE_PATH" \
+              "https://uploads.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID/assets?name=$(basename $SIZE_PATH)" \
+              -o /dev/null -w "Size Upload: HTTP %{http_code}\n"
+          fi
+
+          echo "=== Release published ==="
+          echo "URL: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG"
