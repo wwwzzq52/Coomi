@@ -69,7 +69,7 @@ jobs:
             fi
           done
           command -v sdkmanager
-          yes | sdkmanager --licenses >/dev/null 2>&1
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
           sdkmanager \
             "ndk;27.0.12077973" \
             "platforms;android-36" \
