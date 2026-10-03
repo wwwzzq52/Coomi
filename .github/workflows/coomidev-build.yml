@@ -77,15 +77,20 @@ jobs:
         run: |
           set -uo pipefail
           STORE_FILE="apps/coomi-app/app/testkey_untrusted.jks"
+          rm -f "$STORE_FILE"
+          echo "Generating new keystore at $STORE_FILE"
           keytool -genkeypair -v \
             -keystore "$STORE_FILE" \
+            -storetype PKCS12 \
             -storepass "$STORE_PW" \
             -keypass "$KEY_PW" \
             -alias alias \
             -keyalg RSA \
             -keysize 2048 \
             -validity 10000 \
-            -dname "CN=CoomiDev-Untrusted,OU=Dev,O=Dev,L=Unknown,ST=Unknown,C=US" 2>/dev/null || true
+            -dname "CN=CoomiDev-Untrusted,OU=Dev,O=Dev,L=Unknown,ST=Unknown,C=US"
+          echo "Verifying keystore..."
+          keytool -list -keystore "$STORE_FILE" -storepass "$STORE_PW" -storetype PKCS12
           cat > local.properties << PROPS
             coomi.signing.storePassword=$STORE_PW
             coomi.signing.keyPassword=$KEY_PW
