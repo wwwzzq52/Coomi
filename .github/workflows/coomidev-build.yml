@@ -39,10 +39,10 @@ jobs:
           cache: npm
           cache-dependency-path: apps/web/package-lock.json
 
-      - name: Setup Rust 1.85 with Android target
+      - name: Setup Rust with Android target
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.85.0"
+          toolchain: "stable"
           targets: aarch64-linux-android
           components: rustfmt,clippy
 
@@ -118,7 +118,6 @@ jobs:
           export COOMI_ANDROID_CLANG="$COOMI_NDK_TOOLCHAIN_DIR/aarch64-linux-android24-clang"
           export COOMI_ANDROID_AR="$COOMI_NDK_TOOLCHAIN_DIR/llvm-ar"
           export COOMI_ANDROID_RANLIB="$COOMI_NDK_TOOLCHAIN_DIR/llvm-ranlib"
-          export RUSTUP_TOOLCHAIN=1.85.0
           COOMI_DEV_BUILD=1 \
           TERMUX_APP_VERSION_NAME="$VERSION_NAME" \
           COOMI_NDK_HOME="$NDK_HOME" \
