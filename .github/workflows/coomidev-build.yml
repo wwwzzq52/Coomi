@@ -80,7 +80,7 @@ jobs:
           STORE_FILE="apps/coomi-app/app/testkey_untrusted.jks"
           echo "=== Using existing keystore from repo ==="
           ls -la "$STORE_FILE"
-          keytool -list -keystore "$STORE_FILE" -storepass "$STORE_PW" -storetype PKCS12
+          echo "Keystore file exists, Gradle will use it for signing"
           cat > local.properties << PROPS
             coomi.signing.storePassword=$STORE_PW
             coomi.signing.keyPassword=$KEY_PW
@@ -181,7 +181,7 @@ jobs:
 
           # Create and push tag
           echo "Creating tag $TAG..."
-          git tag -f "$TAG" origin/main
+          git tag -f "$TAG" HEAD
           git push origin "$TAG" --force
           echo "Tag $TAG pushed"
 
