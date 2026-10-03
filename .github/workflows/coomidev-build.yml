@@ -74,13 +74,23 @@ jobs:
           test -x "$ANDROID_HOME/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ranlib"
           echo "NDK 27.0.12077973 installed OK"
 
-      - name: Configure signing
+      - name: Generate signing keystore
         run: |
           set -uo pipefail
           STORE_FILE="apps/coomi-app/app/testkey_untrusted.jks"
-          echo "=== Using existing keystore from repo ==="
-          ls -la "$STORE_FILE"
-          echo "Keystore file exists, Gradle will use it for signing"
+          rm -f "$STORE_FILE"
+          echo "Generating new keystore at $STORE_FILE"
+          keytool -genkeypair -v \
+            -keystore "$STORE_FILE" \
+            -storepass "$STORE_PW" \
+            -keypass "$KEY_PW" \
+            -alias alias \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=CoomiDev, OU=Dev, O=Dev, L=Unknown, ST=Unknown, C=US"
+          echo "Verifying keystore..."
+          keytool -list -keystore "$STORE_FILE" -storepass "$STORE_PW"
           cat > local.properties << PROPS
             coomi.signing.storePassword=$STORE_PW
             coomi.signing.keyPassword=$KEY_PW
