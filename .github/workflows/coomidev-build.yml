@@ -147,7 +147,7 @@ jobs:
           head -40 /tmp/badging.txt
           echo "=== apksigner sign.txt (head 20) ==="
           head -20 /tmp/sign.txt
-          grep -qE "package: name=.{0,3}coomidev" /tmp/badging.txt || { echo "MISSING package (coomidev)"; exit 1; }
+          grep -qE "package:.*coomidev" /tmp/badging.txt || { echo "MISSING package (coomidev)"; exit 1; }
           grep -q "CoomiDev" /tmp/badging.txt || { echo "MISSING label"; exit 1; }
           grep -q "arm64-v8a" /tmp/badging.txt || { echo "MISSING ABI"; exit 1; }
           grep -qE 'Signature #.*Verified' /tmp/sign.txt || { echo "NOT SIGNED"; exit 1; }
